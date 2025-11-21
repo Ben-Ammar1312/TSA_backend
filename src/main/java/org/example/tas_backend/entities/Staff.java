@@ -6,42 +6,46 @@ import org.example.tas_backend.enums.Gender;
 import org.hibernate.envers.Audited;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
 
 @Entity
 @Getter
 @Setter
 @Audited(withModifiedFlag = true)
-@Table(name = "student_applicant",
-        indexes = {@Index(name = "ix_student_keycloak",columnList = "keycloakSub",unique = true)})
-public class StudentApplicant {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+@Table(name = "staff",
+        indexes = {@Index(name = "ix_staff_keycloak", columnList = "keycloakSub", unique = true)})
+public class Staff {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
-    @Column(nullable = false,unique = true)
-    String keycloakSub;
+
+    @Column(nullable = false, unique = true)
+    String keycloakSub;          // Keycloak UUID
+
     String firstName;
     String lastName;
-    LocalDate dateOfBirth;
+
     @Enumerated(EnumType.STRING)
     Gender gender;
+
+    LocalDate dateOfBirth;
+
     String nationalID;
     String email;
     String phoneNumber;
+
+    String jobTitle;
+    String department;
+
     String nationality;
     String residence;
     String visaStatus;
 
-
-
     @Embedded
-    Address address;
-    @OneToMany(mappedBy = "student",cascade =CascadeType.ALL,orphanRemoval = true)
-    List<Application> applications = new ArrayList<>();
+    Address address;             // optional, if you later reuse Address
+
     @Embedded
     private Audit audit = new Audit();
-    @OneToMany(mappedBy = "student", cascade = CascadeType.ALL, orphanRemoval = true)
-    List<StudentFile> files = new ArrayList<>();
 
     @PrePersist
     void prePersist() {

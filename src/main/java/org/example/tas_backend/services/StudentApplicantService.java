@@ -7,6 +7,7 @@ import org.example.tas_backend.entities.Audit;
 import org.example.tas_backend.entities.StudentApplicant;
 import org.example.tas_backend.enums.Gender;
 import org.example.tas_backend.repos.StudentApplicantRepo;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.example.tas_backend.dtos.StudentApplicantProfileDTO;
@@ -19,6 +20,9 @@ import java.util.NoSuchElementException;
 public class StudentApplicantService {
 
     private final StudentApplicantRepo repo;
+    @Value("${storage.upload-root:uploads}")
+    private String uploadRoot;
+
 
     public StudentApplicantService(StudentApplicantRepo repo) {
         this.repo = repo;
@@ -64,6 +68,9 @@ public class StudentApplicantService {
         if (dto.phoneNumber() != null) sa.setPhoneNumber(dto.phoneNumber());
         if (dto.dateOfBirth() != null) sa.setDateOfBirth(dto.dateOfBirth());
         if (dto.nationalID() != null)  sa.setNationalID(dto.nationalID());
+        if (dto.nationality() != null) sa.setNationality(dto.nationality());
+        if (dto.residence() != null)   sa.setResidence(dto.residence());
+        if (dto.visaStatus() != null)  sa.setVisaStatus(dto.visaStatus());
 
         if (dto.gender() != null) {
             // tolerate lowercase from clients
@@ -101,7 +108,10 @@ public class StudentApplicantService {
                 e.getGender() == null ? null : e.getGender().name(),
                 e.getDateOfBirth(),
                 e.getNationalID(),
-                toDto(e.getAddress())
+                toDto(e.getAddress()),
+                e.getNationality(),
+                e.getResidence(),
+                e.getVisaStatus()
         );
     }
 

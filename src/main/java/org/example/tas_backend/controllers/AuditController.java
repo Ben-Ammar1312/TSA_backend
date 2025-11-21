@@ -38,7 +38,7 @@ public class AuditController {
     );
 
     @GetMapping("/{entity}/{id}/history")
-    @PreAuthorize("hasAuthority('ROLE_staff')")
+    @PreAuthorize("hasAuthority('ROLE_STAFF')")
     public List<RevisionSummaryDTO> history(@PathVariable String entity, @PathVariable String id) {
         Class<?> type = resolve(entity);
         Object typedId = Long.parseLong(id);
@@ -46,14 +46,14 @@ public class AuditController {
     }
 
     @GetMapping("/feed")
-    @PreAuthorize("hasAuthority('ROLE_staff')")
+    @PreAuthorize("hasAuthority('ROLE_STAFF')")
     public List<RevisionSummaryDTO> feed(@RequestParam(defaultValue = "20") int perType) {
         int n = Math.min(Math.max(perType, 1), 100);
         return svc.latestChanges(TYPES, n);
     }
 
     @GetMapping("/me/student/history")
-    @PreAuthorize("hasAuthority('ROLE_student')")
+    @PreAuthorize("hasAuthority('ROLE_STUDENT')")
     public List<RevisionSummaryDTO> myStudentHistory(JwtAuthenticationToken auth) {
         String sub = auth.getToken().getSubject();
         Long id = studentRepo.findIdByKeycloakSub(sub)

@@ -33,7 +33,7 @@ public class SecurityConfig {
 
     // MUST match your Keycloak realm and client
     private static final String ISSUER = "http://localhost:8080/realms/TAS";
-    private static final String EXPECTED_AUD = "spring";
+    private static final String EXPECTED_AUD = "angular";
 
     @Bean
     SecurityFilterChain security(HttpSecurity http) throws Exception {
@@ -45,7 +45,7 @@ public class SecurityConfig {
                         .requestMatchers("/public/**").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/staff/**").hasAnyRole("STAFF","ADMIN")
-                        .requestMatchers("/student/**").hasRole("STUDENT")
+                        .requestMatchers("/student/**").hasAnyRole("STUDENT","ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(o -> o.jwt(j -> j
                         .jwtAuthenticationConverter(jwtAuthConverter())
@@ -67,7 +67,7 @@ public class SecurityConfig {
                         new OAuth2Error(OAuth2ErrorCodes.INVALID_TOKEN, "Missing or invalid audience", null));
 
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(withIssuer, audience));
-        return decoder;
+        return JwtDecoders.fromIssuerLocation(ISSUER);
     }
 
     @Bean
