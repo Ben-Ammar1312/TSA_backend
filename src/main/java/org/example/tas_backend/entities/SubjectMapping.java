@@ -25,6 +25,7 @@ public class SubjectMapping {
     Float confidence;
     Boolean auto; // auto vs admin override
     Float normalizedScore; // after scale + coefficient
+    String method; // matcher method (exact, fuzzy, llm, etc.)
 
     @Embedded
     private Audit audit = new Audit();

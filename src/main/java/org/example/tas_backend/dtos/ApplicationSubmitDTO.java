@@ -11,8 +11,5 @@ public record ApplicationSubmitDTO(
         @NotBlank
         String preferredProgram,
 
-        @NotBlank
-        String intakePeriod,
-
         String languageLevel
 ) {}

@@ -27,13 +27,14 @@ public class AuditController {
                     "nationalID","address"
             ),
             Application.class, List.of(
-                    "preferredProgram","intakePeriod","languageLevel","status","decisionBy","decisionDate"
+                    "preferredProgram","languageLevel","status","decisionBy","decisionDate"
             ),
             Document.class, List.of("type","filename","storageKey","mimeType","sizeBytes","rawText"),
             Interview.class, List.of("interviewDate","interviewLink","result","notes","interviewerName"),
             Evaluation.class, List.of("equivalenceScore","aiComments","status","confidence","scoreMaxPossible"),
             ExtractedSubject.class, List.of("rawName","rawScore","rawScale","year","sourceCoefficient"),
-            SubjectMapping.class, List.of("confidence","auto","normalizedScore","targetSubject.id","extractedSubject.id"),
+            // Use top-level association names; Envers stores FK + _MOD flags, not nested id paths.
+            SubjectMapping.class, List.of("confidence","auto","normalizedScore","method","targetSubject","extractedSubject"),
             TargetSubject.class, List.of("code","name","coefficient")
     );
 

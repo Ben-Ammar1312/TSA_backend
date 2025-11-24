@@ -3,15 +3,23 @@ package org.example.tas_backend.services;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.example.tas_backend.dtos.ApplicationSubmitDTO;
+import org.example.tas_backend.dtos.MatchResponseDTO;
+import org.example.tas_backend.dtos.MatchTraceDTO;
 import org.example.tas_backend.dtos.OcrResponse;
 import org.example.tas_backend.entities.Application;
 import org.example.tas_backend.entities.Document;
+import org.example.tas_backend.entities.ExtractedSubject;
+import org.example.tas_backend.entities.SubjectMapping;
 import org.example.tas_backend.entities.StudentApplicant;
+import org.example.tas_backend.entities.TargetSubject;
 import org.example.tas_backend.enums.ApplicationStatus;
 import org.example.tas_backend.enums.DocumentType;
 import org.example.tas_backend.repos.ApplicationRepo;
 import org.example.tas_backend.repos.DocumentRepo;
+import org.example.tas_backend.repos.ExtractedSubjectRepo;
+import org.example.tas_backend.repos.SubjectMappingRepo;
 import org.example.tas_backend.repos.StudentApplicantRepo;
+import org.example.tas_backend.repos.TargetSubjectRepo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -30,12 +38,19 @@ import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.UUID;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ApplicationSubmitService {
 
     @Value("${storage.upload-root:uploads}")
@@ -45,10 +60,13 @@ public class ApplicationSubmitService {
     @Value("${ai.ocr-url}")
     private String ocrUrl;
 
-    private final OAuthClientTokenService tokens;
     private final StudentApplicantRepo studentRepo;
     private final ApplicationRepo applicationRepo;
     private final DocumentRepo documentRepo;
+    private final ExtractedSubjectRepo extractedSubjectRepo;
+    private final SubjectMappingRepo subjectMappingRepo;
+    private final TargetSubjectRepo targetSubjectRepo;
+    private final AiService aiService;
 
     private final RestTemplate restTemplate;
 
@@ -74,11 +92,12 @@ public class ApplicationSubmitService {
         Application app = new Application();
         app.setStudent(student);
         app.setPreferredProgram(dto.preferredProgram());
-        app.setIntakePeriod(dto.intakePeriod());
         app.setLanguageLevel(dto.languageLevel());
         app.setStatus(ApplicationStatus.SUBMITTED);
 
         app = applicationRepo.save(app);
+
+        List<ExtractedSubject> pendingExtracted = new ArrayList<>();
 
         if (files != null && !files.isEmpty()) {
             String subKey = student.getKeycloakSub();
@@ -107,7 +126,7 @@ public class ApplicationSubmitService {
                 doc.setOcrJobId(null);
                 doc.setRawText(null);
 
-                documentRepo.save(doc);
+                doc = documentRepo.save(doc);
 
                 // ======================
                 // *** OCR CALL ***
@@ -116,10 +135,8 @@ public class ApplicationSubmitService {
                     FileSystemResource fileResource = new FileSystemResource(target.toFile());
 
                     // Step 2: sanity check
-                    System.out.println("DEBUG OCR file exists=" + fileResource.exists()
-                            + " readable=" + fileResource.isReadable()
-                            + " sizeBytes=" + Files.size(target)
-                            + " path=" + target);
+                    log.debug("OCR sanity file exists={} readable={} sizeBytes={} path={}",
+                            fileResource.exists(), fileResource.isReadable(), Files.size(target), target);
 
                     // Build multipart body manually to force Content-Length (Django/WSGI rejects chunked)
                     String boundary = "----TASBoundary" + UUID.randomUUID();
@@ -145,34 +162,151 @@ public class ApplicationSubmitService {
                     headers.setContentType(MediaType.parseMediaType("multipart/form-data; boundary=" + boundary));
                     headers.setContentLength(multipartBytes.length);
 
-                    System.out.println("DEBUG Spring -> Django OCR: POST " + ocrUrl +
-                            " file=" + fileResource.getFilename() +
-                            " boundary=" + boundary +
-                            " contentLength=" + multipartBytes.length);
+                    log.debug("Spring -> Django OCR POST {} file={} boundary={} contentLength={}",
+                            ocrUrl, fileResource.getFilename(), boundary, multipartBytes.length);
 
                     ResponseEntity<OcrResponse> resp =
                             restTemplate.postForEntity(ocrUrl, new HttpEntity<>(multipartBytes, headers), OcrResponse.class);
 
-                    System.out.println("DEBUG Spring -> Django OCR: status=" + resp.getStatusCode());
-                    System.out.println("DEBUG Spring -> Django OCR body=" + resp.getBody());
+                    log.debug("Spring -> Django OCR status={} body={}", resp.getStatusCode(), resp.getBody());
 
                     if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
-                        doc.setRawText(resp.getBody().ocr_text());
+                        var body = resp.getBody();
+                        doc.setRawText(body.ocr_text());
                         documentRepo.save(doc);
+
+                        if (body.courses() != null) {
+                            for (String course : body.courses()) {
+                                if (!StringUtils.hasText(course)) continue;
+                                ExtractedSubject es = new ExtractedSubject();
+                                es.setDocument(doc);
+                                es.setRawName(course.trim());
+                                pendingExtracted.add(es);
+                            }
+                        }
                     } else {
-                        System.err.println("OCR non-2xx for " + cleanName + ": " + resp.getStatusCode());
+                        log.warn("OCR non-2xx for {}: {}", cleanName, resp.getStatusCode());
                     }
 
                 } catch (HttpStatusCodeException ex) {
-                    System.err.println("OCR HTTP error for file " + cleanName + ": "
-                            + ex.getStatusCode() + " body=" + ex.getResponseBodyAsString());
+                    log.error("OCR HTTP error for file {}: {} body={}", cleanName, ex.getStatusCode(), ex.getResponseBodyAsString());
 
                 } catch (RestClientException ex) {
-                    System.err.println("OCR call failed for file " + cleanName + ": " + ex.getMessage());
+                    log.error("OCR call failed for file {}: {}", cleanName, ex.getMessage());
                 }
             }
         }
 
+        // persist extracted subjects and run matching
+        var savedSubjects = saveExtractedSubjects(pendingExtracted);
+        log.debug("Persisted {} extracted subjects (pre-match)", savedSubjects.size());
+        runMatching(savedSubjects);
+
         return app;
+    }
+
+    private List<ExtractedSubject> saveExtractedSubjects(List<ExtractedSubject> subjects) {
+        if (subjects == null || subjects.isEmpty()) return List.of();
+
+        var saved = new ArrayList<ExtractedSubject>(subjects.size());
+        for (ExtractedSubject es : subjects) {
+            saved.add(extractedSubjectRepo.save(es));
+        }
+        return saved;
+    }
+
+    private List<Map<String, Object>> buildTargetPayload() {
+        var targets = targetSubjectRepo.findAll();
+        if (targets == null || targets.isEmpty()) return List.of();
+
+        var payload = new ArrayList<Map<String, Object>>(targets.size());
+        for (TargetSubject t : targets) {
+            if (!StringUtils.hasText(t.getCode())) continue;
+
+            Map<String, Object> row = new HashMap<>();
+            row.put("code", t.getCode());
+            String label = StringUtils.hasText(t.getName()) ? t.getName() : t.getCode();
+            row.put("title_fr", label);
+            if (t.getCoefficient() != null) {
+                row.put("coef", t.getCoefficient().intValue());
+            }
+            payload.add(row);
+        }
+        return payload;
+    }
+
+    private void runMatching(List<ExtractedSubject> subjects) {
+        if (subjects == null || subjects.isEmpty()) return;
+
+        var labels = subjects.stream()
+                .map(ExtractedSubject::getRawName)
+                .filter(StringUtils::hasText)
+                .toList();
+        if (labels.isEmpty()) return;
+
+        // Send the admin-managed catalog to the matcher so its view of targets stays aligned.
+        var targets = buildTargetPayload();
+        if (targets.isEmpty()) {
+            log.warn("No target subjects found in Spring DB; matcher will not have a catalog to use");
+        }
+
+        MatchResponseDTO match;
+        try {
+            log.debug("Calling AI matcher with labels={} targets={}", labels, targets.size());
+            match = aiService.matchSubjects(labels, targets);
+        } catch (Exception ex) {
+            log.error("Matcher call failed", ex);
+            return;
+        }
+        if (match == null || match.trace() == null || match.trace().isEmpty()) {
+            log.warn("Matcher returned empty trace for labels={}", labels);
+            return;
+        }
+
+        log.debug("Matcher response coverage_pct={} matched={}", match.coveragePct(), match.matched());
+
+        int limit = Math.min(subjects.size(), match.trace().size());
+        for (int i = 0; i < limit; i++) {
+            ExtractedSubject subject = subjects.get(i);
+            MatchTraceDTO trace = match.trace().get(i);
+
+            // skip if already mapped (idempotent)
+            if (!subjectMappingRepo.findByExtractedSubject(subject).isEmpty()) {
+                continue;
+            }
+
+            String targetCode = trace.target();
+            if (!StringUtils.hasText(targetCode)) {
+                log.debug("No target code for extracted subject {} rawName={}", subject.getId(), subject.getRawName());
+                continue;
+            }
+
+            TargetSubject target = upsertTarget(targetCode, trace.targetTitle(), trace.targetCoef());
+            if (target == null) {
+                log.warn("Skipping mapping for extractedId={} because target code '{}' not found", subject.getId(), targetCode);
+                continue;
+            }
+
+            SubjectMapping mapping = new SubjectMapping();
+            mapping.setExtractedSubject(subject);
+            mapping.setTargetSubject(target);
+            mapping.setConfidence(trace.score() != null ? trace.score().floatValue() : null);
+            mapping.setNormalizedScore(mapping.getConfidence());
+            mapping.setAuto(true);
+            mapping.setMethod(trace.method());
+            subjectMappingRepo.save(mapping);
+            log.debug("Saved auto mapping extractedId={} -> targetCode={} score={} method={}",
+                    subject.getId(), targetCode, mapping.getConfidence(), trace.method());
+        }
+    }
+
+    private TargetSubject upsertTarget(String code, String title, Integer coef) {
+        // Target list is static; do not create or update here
+        Optional<TargetSubject> maybe = targetSubjectRepo.findByCode(code);
+        if (maybe.isEmpty()) {
+            log.warn("Target code '{}' not found; skipping (targets are admin-managed only)", code);
+            return null;
+        }
+        return maybe.get();
     }
 }

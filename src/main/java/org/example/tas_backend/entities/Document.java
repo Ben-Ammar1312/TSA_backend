@@ -30,6 +30,7 @@ public class Document {
     // OCR output id or short text preview
     String ocrJobId;
     @Lob
+    @Column(columnDefinition = "text")
     String rawText;
 
     @Embedded

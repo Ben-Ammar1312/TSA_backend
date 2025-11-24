@@ -26,7 +26,6 @@ public class Application {
     @ManyToOne(fetch=LAZY) @JoinColumn(nullable=false)
     StudentApplicant student;
     String preferredProgram;
-    String intakePeriod;
     String languageLevel;
 
     @Enumerated(EnumType.STRING)

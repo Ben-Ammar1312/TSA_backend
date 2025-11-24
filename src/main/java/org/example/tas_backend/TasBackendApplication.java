@@ -26,7 +26,7 @@ public class TasBackendApplication {
         return builder
                 .requestFactory(() -> factory)
                 .setConnectTimeout(Duration.ofSeconds(10))
-                .setReadTimeout(Duration.ofSeconds(30))
+                .setReadTimeout(Duration.ofSeconds(120)) // OCR + LLM can take time
                 .build();
     }
 
