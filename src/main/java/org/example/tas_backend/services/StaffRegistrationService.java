@@ -12,7 +12,9 @@ import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.ws.rs.core.Response;
 import java.time.LocalDate;
@@ -90,8 +92,20 @@ public class StaffRegistrationService {
                 .users()
                 .create(user);
 
-        if (response.getStatus() >= 300) {
-            throw new IllegalStateException("Failed to create user in Keycloak, status: " + response.getStatus());
+        int status = response.getStatus();
+        String kcBody = null;
+        try {
+            kcBody = response.readEntity(String.class);
+        } catch (Exception ignored) {}
+        if (status >= 300) {
+            // Map common statuses to clearer API errors
+            if (status == 409) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Username or email already exists in Keycloak.");
+            }
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Failed to create user in Keycloak, status: " + status + (kcBody != null ? " body: " + kcBody : "")
+            );
         }
 
         String userId = extractId(response);

@@ -73,7 +73,7 @@ public class AiService {
 
     public void deleteTarget(String idOrUuid) {
         log.debug("Calling AI deleteTarget id={}", idOrUuid);
-        auth(rest.delete().uri("/targets/{id}/"))
+        auth(rest.delete().uri("/targets/{id}/", idOrUuid))
                 .retrieve().toBodilessEntity();
     }
 

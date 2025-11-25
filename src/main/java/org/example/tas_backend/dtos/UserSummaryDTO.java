@@ -8,5 +8,7 @@ public record UserSummaryDTO(
         String email,
         String firstName,
         String lastName,
-        List<String> roles
+        List<String> roles,
+        String phoneNumber,
+        String jobTitle
 ) {}

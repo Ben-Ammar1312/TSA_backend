@@ -31,6 +31,18 @@ public class MatcherController {
         return django.updateTarget(id, body);
     }
 
+    @PostMapping("/targets")
+    public SubjectTargetDTO createTarget(@RequestBody SubjectTargetDTO body) {
+        log.debug("Admin create target payload={}", body);
+        return django.createTarget(body);
+    }
+
+    @DeleteMapping("/targets/{id}")
+    public void deleteTarget(@PathVariable String id) {
+        log.debug("Admin delete target id={}", id);
+        django.deleteTarget(id);
+    }
+
     @GetMapping("/aliases")
     public List<SubjectAliasDTO> listAliases(@RequestParam(required=false) String language,
                                              @RequestParam(name="target_code", required=false) String targetCode,
