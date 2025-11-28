@@ -8,6 +8,7 @@ import org.example.tas_backend.entities.Application;
 import org.example.tas_backend.entities.StudentApplicant;
 import org.example.tas_backend.repos.ApplicationRepo;
 import org.example.tas_backend.repos.DocumentRepo;
+import org.example.tas_backend.repos.StudentApplicantRepo;
 import org.example.tas_backend.services.MappingQueryService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -28,12 +29,29 @@ public class ApplicationMappingController {
     private final MappingQueryService mappingQueryService;
     private final ApplicationRepo applicationRepo;
     private final DocumentRepo documentRepo;
+    private final StudentApplicantRepo studentRepo;
 
     // -------- Student endpoints --------
 
     @GetMapping("/student/applications/latest/mappings")
     public ApplicationMappingViewDTO latestForStudent(@AuthenticationPrincipal Jwt jwt) {
         return mappingQueryService.latestForStudent(jwt.getSubject());
+    }
+
+    @GetMapping("/student/applications/latest/summary")
+    public ApplicationSummaryDTO latestSummaryForStudent(@AuthenticationPrincipal Jwt jwt) {
+        StudentApplicant student = studentRepo.findByKeycloakSub(jwt.getSubject())
+                .orElseThrow(() -> new NoSuchElementException("student not found"));
+        return applicationRepo.findTopByStudentOrderByIdDesc(student)
+                .map(app -> new ApplicationSummaryDTO(
+                        app.getId(),
+                        null,
+                        app.getStatus() != null ? app.getStatus().name() : null,
+                        Optional.ofNullable(app.getDocuments())
+                                .map(List::size)
+                                .orElseGet(() -> documentRepo.findByApplication(app).size())
+                ))
+                .orElse(new ApplicationSummaryDTO(null, null, null, 0));
     }
 
     @GetMapping("/student/applications/{id}/mappings")

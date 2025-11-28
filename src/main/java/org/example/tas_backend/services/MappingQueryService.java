@@ -49,6 +49,20 @@ public class MappingQueryService {
         return build(app);
     }
 
+    @Transactional
+    public int countMappedSubjects(Long appId) {
+        Application app = applicationRepo.findById(appId)
+                .orElseThrow(() -> new NoSuchElementException("application not found: " + appId));
+        List<Document> docs = documentRepo.findByApplication(app);
+        if (docs.isEmpty()) return 0;
+        List<ExtractedSubject> subjects = extractedSubjectRepo.findByDocumentIn(docs);
+        if (subjects.isEmpty()) return 0;
+        List<SubjectMapping> mappings = subjectMappingRepo.findByExtractedSubjectIn(subjects);
+        return (int) mappings.stream()
+                .filter(m -> m.getTargetSubject() != null)
+                .count();
+    }
+
     private ApplicationMappingViewDTO build(Application app) {
         List<Document> docs = documentRepo.findByApplication(app);
         List<ExtractedSubject> subjects = docs.isEmpty()

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -58,9 +59,12 @@ public class InviteController {
     @PostMapping("/invites/{id}/accept")
     public Invite accept(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
         Invite inv = repo.findById(id).orElseThrow();
-        enforceTarget(inv, jwt);
+        enforceAccept(inv, jwt);
         inv.setStatus(InviteStatus.ACCEPTED);
-        inv.setProposedTime(null);
+        if (inv.getProposedTime() != null) {
+            inv.setScheduledTime(inv.getProposedTime());
+            inv.setProposedTime(null);
+        }
         inv = repo.save(inv);
         publish(inv);
         return inv;
@@ -72,6 +76,7 @@ public class InviteController {
         enforceTarget(inv, jwt);
         inv.setStatus(InviteStatus.PROPOSED);
         inv.setProposedTime(body.getProposedTime());
+        inv.setScheduledTime(inv.getScheduledTime()); // keep existing
         inv = repo.save(inv);
         publish(inv);
         return inv;
@@ -95,6 +100,17 @@ public class InviteController {
         publish(inv);
     }
 
+    @PostMapping("/invites/{id}/decline_proposed")
+    public Invite declineProposed(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
+        Invite inv = repo.findById(id).orElseThrow();
+        enforceCreator(inv, jwt);
+        inv.setProposedTime(null);
+        inv.setStatus(InviteStatus.PENDING);
+        inv = repo.save(inv);
+        publish(inv);
+        return inv;
+    }
+
     private void publish(Invite inv) {
         broker.convertAndSend("/topic/invites/" + inv.getTargetUserId(), inv);
         broker.convertAndSend("/topic/invites/admin", inv);
@@ -103,6 +119,27 @@ public class InviteController {
     private void enforceTarget(Invite inv, Jwt jwt) {
         if (jwt == null || jwt.getSubject() == null || !jwt.getSubject().equals(inv.getTargetUserId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the target user can update this invite");
+        }
+    }
+
+    private void enforceCreator(Invite inv, Jwt jwt) {
+        if (jwt == null || jwt.getSubject() == null || inv.getCreatedBy() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the creator can perform this action");
+        }
+        if (!jwt.getSubject().equals(inv.getCreatedBy())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the creator can perform this action");
+        }
+    }
+
+    private void enforceAccept(Invite inv, Jwt jwt) {
+        if (jwt == null || jwt.getSubject() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+        }
+        String sub = jwt.getSubject();
+        boolean isTarget = sub.equals(inv.getTargetUserId());
+        boolean isCreator = inv.getCreatedBy() != null && inv.getCreatedBy().equals(sub);
+        if (!isTarget && !(isCreator && inv.getStatus() == InviteStatus.PROPOSED)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to accept invite");
         }
     }
 }
