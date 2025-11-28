@@ -20,6 +20,9 @@ import org.example.tas_backend.repos.ExtractedSubjectRepo;
 import org.example.tas_backend.repos.SubjectMappingRepo;
 import org.example.tas_backend.repos.StudentApplicantRepo;
 import org.example.tas_backend.repos.TargetSubjectRepo;
+import org.example.tas_backend.repos.MappingSuggestionRepo;
+import org.example.tas_backend.entities.MappingSuggestion;
+import org.example.tas_backend.enums.SuggestionStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -45,6 +48,7 @@ import java.util.HashMap;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
+import java.text.Normalizer;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -66,9 +70,13 @@ public class ApplicationSubmitService {
     private final ExtractedSubjectRepo extractedSubjectRepo;
     private final SubjectMappingRepo subjectMappingRepo;
     private final TargetSubjectRepo targetSubjectRepo;
+    private final MappingSuggestionRepo mappingSuggestionRepo;
     private final AiService aiService;
 
     private final RestTemplate restTemplate;
+
+    // Used to avoid duplicate subject rows when mixing OCR array + fallback parsing
+    private final java.util.Set<String> extractedLabels = new java.util.HashSet<>();
 
     private StudentApplicant findBySub(String sub) {
         return studentRepo.findByKeycloakSub(sub)
@@ -175,14 +183,19 @@ public class ApplicationSubmitService {
                         doc.setRawText(body.ocr_text());
                         documentRepo.save(doc);
 
-                        if (body.courses() != null) {
-                            for (String course : body.courses()) {
-                                if (!StringUtils.hasText(course)) continue;
-                                ExtractedSubject es = new ExtractedSubject();
-                                es.setDocument(doc);
-                                es.setRawName(course.trim());
-                                pendingExtracted.add(es);
-                            }
+                        List<String> courses = body.courses() != null ? body.courses() : List.of();
+                        courses = filterCourses(courses);
+                        if (courses.isEmpty()) {
+                            courses = fallbackExtractFromRaw(body.ocr_text());
+                            log.debug("OCR fallback extracted {} subjects from raw_text", courses.size());
+                        }
+
+                        for (String course : courses) {
+                            if (!StringUtils.hasText(course)) continue;
+                            ExtractedSubject es = new ExtractedSubject();
+                            es.setDocument(doc);
+                            es.setRawName(course.trim());
+                            pendingExtracted.add(es);
                         }
                     } else {
                         log.warn("OCR non-2xx for {}: {}", cleanName, resp.getStatusCode());
@@ -199,7 +212,8 @@ public class ApplicationSubmitService {
 
         // persist extracted subjects and run matching
         var savedSubjects = saveExtractedSubjects(pendingExtracted);
-        log.debug("Persisted {} extracted subjects (pre-match)", savedSubjects.size());
+        log.debug("Persisted {} extracted subjects (pre-match): {}", savedSubjects.size(),
+                savedSubjects.stream().map(ExtractedSubject::getRawName).toList());
         runMatching(savedSubjects);
 
         return app;
@@ -240,8 +254,10 @@ public class ApplicationSubmitService {
 
         var labels = subjects.stream()
                 .map(ExtractedSubject::getRawName)
+                .map(this::normalizeForMatch)
                 .filter(StringUtils::hasText)
                 .toList();
+        log.debug("Sending {} subjects to matcher: {}", labels.size(), labels);
         if (labels.isEmpty()) return;
 
         // Send the admin-managed catalog to the matcher so its view of targets stays aligned.
@@ -297,7 +313,134 @@ public class ApplicationSubmitService {
             subjectMappingRepo.save(mapping);
             log.debug("Saved auto mapping extractedId={} -> targetCode={} score={} method={}",
                     subject.getId(), targetCode, mapping.getConfidence(), trace.method());
+
+            maybeRecordSuggestion(trace, subject);
         }
+    }
+
+    private String normalizeForMatch(String raw) {
+        if (!StringUtils.hasText(raw)) return raw;
+        String noDiacritics = Normalizer.normalize(raw, Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        String cleaned = noDiacritics.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\s]+", " ");
+        String compact = cleaned.trim().replaceAll("\\s+", " ");
+        return compact.toLowerCase();
+    }
+
+    private void maybeRecordSuggestion(MatchTraceDTO trace, ExtractedSubject subject) {
+        if (trace == null || subject == null) return;
+        String method = trace.method();
+        if (!StringUtils.hasText(method)) return;
+
+        String m = method.toLowerCase();
+        boolean isLlm = m.contains("llm");
+        boolean isFuzzy = m.contains("fuzzy") && (trace.score() == null || trace.score() < 0.95);
+
+        if (!isLlm && !isFuzzy) return;
+
+        String targetCode = trace.target();
+        String rawLabel = subject.getRawName();
+        String normLabel = normalizeForMatch(rawLabel);
+        if (!StringUtils.hasText(targetCode) || !StringUtils.hasText(normLabel)) return;
+
+        String language = "fr"; // default fallback
+
+        Optional<MappingSuggestion> existing = mappingSuggestionRepo
+                .findByNormLabelAndProposedTargetCodeAndLanguage(normLabel, targetCode, language);
+        if (existing.isPresent()) return; // idempotent
+
+        MappingSuggestion s = new MappingSuggestion();
+        s.setSrcLabel(rawLabel);
+        s.setNormLabel(normLabel);
+        s.setProposedTargetCode(targetCode);
+        s.setLanguage(language);
+        s.setScore(trace.score() != null ? trace.score() : 0d);
+        s.setMethod(method);
+        s.setStatus(SuggestionStatus.PENDING);
+        s.setCreatedBy(isLlm ? "matcher-llm" : "matcher-fuzzy");
+
+        mappingSuggestionRepo.save(s);
+        log.debug("Recorded suggestion for raw='{}' target='{}' method={} score={}",
+                rawLabel, targetCode, method, trace.score());
+    }
+
+    /**
+     * Fallback parser when AI returns raw_text but no structured courses.
+     * Picks lines with letters, trims punctuation, deduplicates, and skips obvious
+     * grade/metadata lines.
+     */
+    private List<String> fallbackExtractFromRaw(String rawText) {
+        if (!StringUtils.hasText(rawText)) return List.of();
+
+        var lines = rawText.split("\\r?\\n");
+        var out = new ArrayList<String>();
+        var seen = new java.util.HashSet<String>();
+
+        for (String line : lines) {
+            if (!StringUtils.hasText(line)) continue;
+            String cleaned = line.replaceAll("[{}\\[\\]]", " ")
+                    .replaceAll("[,:;]+", " ")
+                    .trim();
+            String sanitized = sanitizeCourseLabel(cleaned, seen);
+            if (sanitized != null) out.add(sanitized);
+        }
+        // Cap to a reasonable number to avoid garbage floods
+        if (out.size() > 40) {
+            return out.subList(0, 40);
+        }
+        return out;
+    }
+
+    private List<String> filterCourses(List<String> courses) {
+        if (courses == null || courses.isEmpty()) return List.of();
+        var seen = new java.util.HashSet<String>();
+        var out = new ArrayList<String>();
+        for (String c : courses) {
+            if (!StringUtils.hasText(c)) continue;
+            String sanitized = sanitizeCourseLabel(c, seen);
+            if (sanitized != null) out.add(sanitized);
+        }
+        return out;
+    }
+
+    /**
+     * Returns a cleaned course label or null if it should be skipped (headers, categories, grades).
+     */
+    private String sanitizeCourseLabel(String input, java.util.Set<String> seen) {
+        if (!StringUtils.hasText(input)) return null;
+        String cleaned = input.trim();
+        if (cleaned.length() < 3) return null;
+
+        String lower = cleaned.toLowerCase();
+        String normalizedLower = Normalizer.normalize(lower, Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        // Skip headers/categories/grades
+        if (lower.contains("semestre") || lower.contains("/semestre") || lower.contains("unité") || lower.contains("unite/matiere") || lower.contains("unité/matière"))
+            return null;
+        if (lower.contains("cpi")) return null;
+        if (normalizedLower.contains("algorithmique et programmation")) return null;
+        if (normalizedLower.contains("langues, communication")) return null;
+        if (normalizedLower.contains("science fondamental")) return null;
+        if (normalizedLower.contains("systeme d'information")) return null;
+        if (normalizedLower.contains("aux et systemes d'exploitation")) return null;
+        if (lower.matches("^(coef|coefficient|examen|travaux|projet|moyenne|credit|crédit|rattrapage|devoir|tp|td|crédit cap).*"))
+            return null;
+        if (cleaned.matches("^[0-9.,\\s]+$")) return null;
+        // Drop ultra-short single-word tokens without numbers (noise like "math", "terme", "physics")
+        if (!cleaned.matches(".*\\d.*")) {
+            String[] parts = cleaned.split("\\s+");
+            if (parts.length == 1 && cleaned.length() <= 5) return null;
+        }
+
+        // Require at least one letter
+        if (!cleaned.matches(".*[A-Za-zÀ-ÿ].*")) return null;
+
+        // Normalize spacing + strip punctuation at ends
+        cleaned = cleaned.replaceAll("\\s+", " ").replaceAll("^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}]+$", "");
+
+        String key = cleaned.toLowerCase();
+        if (seen != null && !seen.add(key)) return null;
+        return cleaned;
     }
 
     private TargetSubject upsertTarget(String code, String title, Integer coef) {

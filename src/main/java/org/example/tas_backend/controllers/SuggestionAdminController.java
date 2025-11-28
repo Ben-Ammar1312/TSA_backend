@@ -9,6 +9,7 @@ import org.example.tas_backend.repos.MappingSuggestionRepo;
 import org.example.tas_backend.services.AiService;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.core.Authentication;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -24,9 +25,14 @@ public class SuggestionAdminController {
 
     @GetMapping
     public List<MappingSuggestion> list(@RequestParam(required=false) String status) {
-        var all = repo.findAll(Sort.by(Sort.Direction.DESC, "createdAt"));
-        if (status == null) return all;
-        return all.stream().filter(s -> s.getStatus().name().equals(status)).toList();
+        var sort = Sort.by(Sort.Direction.DESC, "createdAt");
+        if (status == null) return repo.findAll(sort);
+        try {
+            var st = SuggestionStatus.valueOf(status.toUpperCase());
+            return repo.findByStatus(st, sort);
+        } catch (IllegalArgumentException ex) {
+            return repo.findAll(sort);
+        }
     }
 
     @PostMapping("/{id}/decide")
@@ -37,10 +43,19 @@ public class SuggestionAdminController {
         var s = repo.findById(id).orElseThrow();
         if (!s.getStatus().equals(SuggestionStatus.PENDING)) return s;
 
+        if (!StringUtils.hasText(s.getProposedTargetCode()) || !StringUtils.hasText(s.getSrcLabel())) {
+            s.setStatus(SuggestionStatus.REJECTED);
+            s.setReason("Missing target or label; auto-rejected");
+            s.setDecidedBy(auth != null ? auth.getName() : "admin");
+            s.setDecidedAt(OffsetDateTime.now());
+            return repo.save(s);
+        }
+
         if ("accept".equalsIgnoreCase(body.getAction())) {
             // create alias in Django
             var alias = new org.example.tas_backend.dtos.SubjectAliasDTO(
-                    null, s.getProposedTargetCode(), s.getSrcLabel(), null, s.getLanguage());
+                    null, s.getProposedTargetCode(), s.getSrcLabel(), null,
+                    StringUtils.hasText(s.getLanguage()) ? s.getLanguage() : "fr");
             django.createAlias(alias);
 
             s.setStatus(SuggestionStatus.ACCEPTED);
