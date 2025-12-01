@@ -4,5 +4,7 @@ public record ApplicationSummaryDTO(
         Long id,
         String studentName,
         String status,
-        int documentsCount
+        int documentsCount,
+        Integer matchedCount,
+        Integer thresholdCount
 ) {}

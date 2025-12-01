@@ -3,6 +3,7 @@ package org.example.tas_backend.services;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.example.tas_backend.dtos.ApplicationSubmitDTO;
+import org.example.tas_backend.dtos.AddressDTO;
 import org.example.tas_backend.dtos.MatchResponseDTO;
 import org.example.tas_backend.dtos.MatchTraceDTO;
 import org.example.tas_backend.dtos.OcrResponse;
@@ -12,6 +13,7 @@ import org.example.tas_backend.entities.ExtractedSubject;
 import org.example.tas_backend.entities.SubjectMapping;
 import org.example.tas_backend.entities.StudentApplicant;
 import org.example.tas_backend.entities.TargetSubject;
+import org.example.tas_backend.entities.Address;
 import org.example.tas_backend.enums.ApplicationStatus;
 import org.example.tas_backend.enums.DocumentType;
 import org.example.tas_backend.repos.ApplicationRepo;
@@ -23,6 +25,7 @@ import org.example.tas_backend.repos.TargetSubjectRepo;
 import org.example.tas_backend.repos.MappingSuggestionRepo;
 import org.example.tas_backend.entities.MappingSuggestion;
 import org.example.tas_backend.enums.SuggestionStatus;
+import org.example.tas_backend.services.AcceptanceService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
@@ -72,6 +75,7 @@ public class ApplicationSubmitService {
     private final TargetSubjectRepo targetSubjectRepo;
     private final MappingSuggestionRepo mappingSuggestionRepo;
     private final AiService aiService;
+    private final AcceptanceService acceptanceService;
 
     private final RestTemplate restTemplate;
 
@@ -95,6 +99,8 @@ public class ApplicationSubmitService {
             if (p.nationality() != null) student.setNationality(p.nationality());
             if (p.residence() != null)   student.setResidence(p.residence());
             if (p.visaStatus() != null)  student.setVisaStatus(p.visaStatus());
+            if (p.gender() != null)      student.setGender(org.example.tas_backend.enums.Gender.valueOf(p.gender().toUpperCase()));
+            if (p.address() != null)     student.setAddress(mergeAddress(student.getAddress(), p.address()));
         }
 
         Application app = new Application();
@@ -215,6 +221,7 @@ public class ApplicationSubmitService {
         log.debug("Persisted {} extracted subjects (pre-match): {}", savedSubjects.size(),
                 savedSubjects.stream().map(ExtractedSubject::getRawName).toList());
         runMatching(savedSubjects);
+        acceptanceService.reevaluateApplication(app.getId());
 
         return app;
     }
@@ -451,5 +458,16 @@ public class ApplicationSubmitService {
             return null;
         }
         return maybe.get();
+    }
+
+    private Address mergeAddress(Address current, AddressDTO dto) {
+        Address a = current == null ? new Address() : current;
+        if (dto.line1()          != null) a.setLine1(dto.line1());
+        if (dto.line2()          != null) a.setLine2(dto.line2());
+        if (dto.city()           != null) a.setCity(dto.city());
+        if (dto.stateOrProvince()!= null) a.setRegion(dto.stateOrProvince());
+        if (dto.postalCode()     != null) a.setPostalCode(dto.postalCode());
+        if (dto.country()        != null) a.setCountry(dto.country());
+        return a;
     }
 }

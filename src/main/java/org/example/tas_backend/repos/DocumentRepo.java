@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface DocumentRepo extends JpaRepository<Document, Long> {
     List<Document> findByApplication(org.example.tas_backend.entities.Application application);
+    long countByApplication(org.example.tas_backend.entities.Application application);
 }

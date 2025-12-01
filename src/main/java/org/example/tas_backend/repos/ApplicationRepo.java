@@ -9,5 +9,6 @@ import java.util.Optional;
 
 public interface ApplicationRepo extends JpaRepository<Application, Long> {
     Optional<Application> findTopByStudentOrderByIdDesc(StudentApplicant student);
+    Optional<Application> findTopByStudent_KeycloakSubOrderByIdDesc(String keycloakSub);
     List<Application> findTop20ByOrderByIdDesc();
 }

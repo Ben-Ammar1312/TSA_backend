@@ -10,6 +10,7 @@ import org.example.tas_backend.enums.SuggestionStatus;
 import org.example.tas_backend.repos.MappingSuggestionRepo;
 import org.example.tas_backend.repos.SubjectMappingRepo;
 import org.example.tas_backend.repos.TargetSubjectRepo;
+import org.example.tas_backend.services.AcceptanceService;
 import org.example.tas_backend.services.AiService;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
@@ -32,6 +33,7 @@ public class SubjectMappingAdminController {
     private final TargetSubjectRepo targetRepo;
     private final MappingSuggestionRepo suggestionRepo;
     private final AiService ai;
+    private final AcceptanceService acceptanceService;
 
     @PatchMapping("/{id}")
     @Transactional
@@ -78,6 +80,11 @@ public class SubjectMappingAdminController {
             cleanupAfterChange(previousMethod,
                     previousTarget != null ? previousTarget.getCode() : null,
                     extracted != null ? extracted.getRawName() : null);
+        }
+
+        // Re-evaluate acceptance status for the owning application
+        if (extracted != null && extracted.getDocument() != null && extracted.getDocument().getApplication() != null) {
+            acceptanceService.reevaluateApplication(extracted.getDocument().getApplication().getId());
         }
 
         return new SubjectMappingViewDTO(

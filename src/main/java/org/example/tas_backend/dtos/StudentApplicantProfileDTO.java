@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Pattern;
 
 import java.time.LocalDate;
+import java.util.List;
 
 public record StudentApplicantProfileDTO(
         Long id,
@@ -20,5 +21,8 @@ public record StudentApplicantProfileDTO(
         @Valid AddressDTO address,
         String nationality,
         String residence,
-        String visaStatus
+        String visaStatus,
+        String language,
+        List<String> uploadedFiles,
+        List<DocumentInfoDTO> uploadedFileDetails
 ) {}

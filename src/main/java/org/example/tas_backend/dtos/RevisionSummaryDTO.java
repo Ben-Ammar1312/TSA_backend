@@ -2,6 +2,15 @@ package org.example.tas_backend.dtos;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
-public record RevisionSummaryDTO(String entity, Object entityId,Number revision, Instant at , String by, List<String> changedFields) {
+public record RevisionSummaryDTO(
+        String entity,
+        Object entityId,
+        Number revision,
+        Instant at,
+        String by,
+        List<String> changedFields,
+        Map<String, String> changedValues
+) {
 }

@@ -6,11 +6,16 @@ import org.example.tas_backend.entities.Address;
 import org.example.tas_backend.entities.Audit;
 import org.example.tas_backend.entities.StudentApplicant;
 import org.example.tas_backend.enums.Gender;
+import org.example.tas_backend.entities.Application;
+import org.example.tas_backend.entities.Document;
+import org.example.tas_backend.repos.ApplicationRepo;
+import org.example.tas_backend.repos.DocumentRepo;
 import org.example.tas_backend.repos.StudentApplicantRepo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.example.tas_backend.dtos.StudentApplicantProfileDTO;
+import org.example.tas_backend.dtos.DocumentInfoDTO;
 
 
 
@@ -20,12 +25,18 @@ import java.util.NoSuchElementException;
 public class StudentApplicantService {
 
     private final StudentApplicantRepo repo;
+    private final ApplicationRepo applicationRepo;
+    private final DocumentRepo documentRepo;
     @Value("${storage.upload-root:uploads}")
     private String uploadRoot;
 
 
-    public StudentApplicantService(StudentApplicantRepo repo) {
+    public StudentApplicantService(StudentApplicantRepo repo,
+                                   ApplicationRepo applicationRepo,
+                                   DocumentRepo documentRepo) {
         this.repo = repo;
+        this.applicationRepo = applicationRepo;
+        this.documentRepo = documentRepo;
     }
 
     /** Create-or-refresh snapshot from Keycloak JWT (firstName, lastName, email). */
@@ -98,20 +109,28 @@ public class StudentApplicantService {
     }
 
     private StudentApplicantProfileDTO toDto(StudentApplicant e) {
+        Application latestApp = applicationRepo.findTopByStudentOrderByIdDesc(e).orElse(null);
+        var docs = latestApp != null ? documentRepo.findByApplication(latestApp) : java.util.List.<Document>of();
+
         return new StudentApplicantProfileDTO(
-                e.getId(),
-                e.getKeycloakSub(),
-                e.getFirstName(),
-                e.getLastName(),
-                e.getEmail(),
-                e.getPhoneNumber(),
-                e.getGender() == null ? null : e.getGender().name(),
-                e.getDateOfBirth(),
-                e.getNationalID(),
-                toDto(e.getAddress()),
-                e.getNationality(),
-                e.getResidence(),
-                e.getVisaStatus()
+            e.getId(),
+            e.getKeycloakSub(),
+            e.getFirstName(),
+            e.getLastName(),
+            e.getEmail(),
+            e.getPhoneNumber(),
+            e.getGender() == null ? null : e.getGender().name(),
+            e.getDateOfBirth(),
+            e.getNationalID(),
+            toDto(e.getAddress()),
+            e.getNationality(),
+            e.getResidence(),
+            e.getVisaStatus(),
+            latestApp != null ? latestApp.getLanguageLevel() : null,
+            docs.stream().map(this::toPublicPath).toList(),
+            docs.stream()
+                    .map(this::toDocumentInfo)
+                    .toList()
         );
     }
 
@@ -136,5 +155,28 @@ public class StudentApplicantService {
         if (dto.postalCode()     != null) a.setPostalCode(dto.postalCode());
         if (dto.country()        != null) a.setCountry(dto.country());
         return a;
+    }
+
+    private String toPublicPath(Document doc) {
+        if (doc == null) return null;
+        String key = doc.getStorageKey();
+        if (key == null) return null;
+        String normalized = key.replace("\\", "/");
+        if (normalized.contains(uploadRoot)) {
+            int idx = normalized.indexOf(uploadRoot);
+            return "/" + normalized.substring(idx);
+        }
+        return "/" + normalized;
+    }
+
+    private DocumentInfoDTO toDocumentInfo(Document doc) {
+        String url = toPublicPath(doc);
+        return new DocumentInfoDTO(
+                url,
+                doc.getFilename(),
+                doc.getMimeType(),
+                doc.getSizeBytes(),
+                null
+        );
     }
 }
