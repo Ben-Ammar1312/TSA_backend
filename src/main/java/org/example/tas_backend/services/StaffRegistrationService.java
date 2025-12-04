@@ -54,6 +54,9 @@ public class StaffRegistrationService {
         staff.setJobTitle(req.jobTitle());
         staff.setDepartment(req.department());
         staff.setNationalID(req.nationalID());
+        if (req.photoDataUrl() != null) {
+            staff.setPhotoData(req.photoDataUrl());
+        }
 
         if (req.gender() != null) {
             staff.setGender(req.gender());
@@ -156,7 +159,8 @@ public class StaffRegistrationService {
                 e.getDateOfBirth(),
                 e.getNationalID(),
                 e.getJobTitle(),
-                e.getDepartment()
+                e.getDepartment(),
+                e.getPhotoData()
         );
     }
 }

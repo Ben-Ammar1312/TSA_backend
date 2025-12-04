@@ -4,6 +4,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.example.tas_backend.enums.Gender;
 import org.hibernate.envers.Audited;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDate;
 
@@ -40,6 +42,9 @@ public class Staff {
     String nationality;
     String residence;
     String visaStatus;
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(columnDefinition = "text")
+    String photoData;
 
     @Embedded
     Address address;             // optional, if you later reuse Address

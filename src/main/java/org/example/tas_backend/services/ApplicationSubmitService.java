@@ -101,6 +101,7 @@ public class ApplicationSubmitService {
             if (p.visaStatus() != null)  student.setVisaStatus(p.visaStatus());
             if (p.gender() != null)      student.setGender(org.example.tas_backend.enums.Gender.valueOf(p.gender().toUpperCase()));
             if (p.address() != null)     student.setAddress(mergeAddress(student.getAddress(), p.address()));
+            if (p.photoDataUrl() != null) student.setPhotoData(p.photoDataUrl());
         }
 
         Application app = new Application();

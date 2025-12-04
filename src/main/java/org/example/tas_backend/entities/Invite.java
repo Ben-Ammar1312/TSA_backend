@@ -40,4 +40,13 @@ public class Invite {
     private OffsetDateTime createdAt;
 
     private String createdBy;
+
+    @Column(length = 6000)
+    private String callSummary;
+
+    private OffsetDateTime summaryGeneratedAt;
+
+    private String recordingPath;
+
+    private String recordingUrl;
 }

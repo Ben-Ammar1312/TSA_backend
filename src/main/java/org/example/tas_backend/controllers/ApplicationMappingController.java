@@ -15,6 +15,7 @@ import org.example.tas_backend.repos.StudentApplicantRepo;
 import org.example.tas_backend.services.MappingQueryService;
 import org.example.tas_backend.services.AcceptanceService;
 import org.springframework.http.HttpStatus;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,9 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.Optional;
+import java.util.*;
 
 @RestController
 @RequestMapping
@@ -40,6 +39,7 @@ public class ApplicationMappingController {
     private final DocumentRepo documentRepo;
     private final StudentApplicantRepo studentRepo;
     private final AcceptanceService acceptanceService;
+    private final SimpMessagingTemplate broker;
 
     // -------- Student endpoints --------
 
@@ -127,6 +127,16 @@ public class ApplicationMappingController {
         app.setDecisionDate(Instant.now());
         app.setDecisionBy(resolveActor(jwt));
         applicationRepo.save(app);
+
+        // Notify student via WebSocket (/topic/app_status/{studentSub})
+        StudentApplicant student = app.getStudent();
+        if (student != null && student.getKeycloakSub() != null) {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("applicationId", app.getId());
+            payload.put("status", newStatus.name());
+            payload.put("decidedAt", app.getDecisionDate());
+            broker.convertAndSend("/topic/app_status/" + student.getKeycloakSub(), payload);
+        }
 
         AcceptanceRule rule = acceptanceService.getRule();
         return buildAdminSummary(app, rule);

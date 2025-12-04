@@ -18,5 +18,6 @@ public record StaffProfileDTO(
         @Past LocalDate dateOfBirth,
         String nationalID,
         String jobTitle,
-        String department
+        String department,
+        String photoDataUrl
 ) {}

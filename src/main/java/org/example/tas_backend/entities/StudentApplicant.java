@@ -4,6 +4,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.example.tas_backend.enums.Gender;
 import org.hibernate.envers.Audited;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -31,6 +33,9 @@ public class StudentApplicant {
     String nationality;
     String residence;
     String visaStatus;
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(columnDefinition = "text")
+    String photoData;
 
 
 

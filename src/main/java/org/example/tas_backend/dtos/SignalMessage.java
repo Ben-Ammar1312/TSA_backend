@@ -9,4 +9,5 @@ public class SignalMessage {
     private String to;
     private String sdp;
     private String candidate;
+    private String inviteId;
 }

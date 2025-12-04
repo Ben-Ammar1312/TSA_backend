@@ -82,6 +82,7 @@ public class StudentApplicantService {
         if (dto.nationality() != null) sa.setNationality(dto.nationality());
         if (dto.residence() != null)   sa.setResidence(dto.residence());
         if (dto.visaStatus() != null)  sa.setVisaStatus(dto.visaStatus());
+        if (dto.photoDataUrl() != null) sa.setPhotoData(dto.photoDataUrl());
 
         if (dto.gender() != null) {
             // tolerate lowercase from clients
@@ -130,7 +131,8 @@ public class StudentApplicantService {
             docs.stream().map(this::toPublicPath).toList(),
             docs.stream()
                     .map(this::toDocumentInfo)
-                    .toList()
+                    .toList(),
+            e.getPhotoData()
         );
     }
 
