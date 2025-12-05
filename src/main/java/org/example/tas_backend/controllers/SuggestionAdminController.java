@@ -67,4 +67,20 @@ public class SuggestionAdminController {
         s.setReason(body.getComment());
         return repo.save(s);
     }
+
+    /** Danger: purge suggestions (optionally filter by status=accepted|rejected|pending). */
+    @DeleteMapping
+    @Transactional
+    public void deleteAll(@RequestParam(required = false) String status) {
+        if (!StringUtils.hasText(status)) {
+            repo.deleteAll();
+            return;
+        }
+        try {
+            var st = SuggestionStatus.valueOf(status.toUpperCase());
+            repo.deleteAll(repo.findByStatus(st, Sort.unsorted()));
+        } catch (IllegalArgumentException ignored) {
+            // ignore invalid status parameter
+        }
+    }
 }
