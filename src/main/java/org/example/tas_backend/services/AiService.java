@@ -47,39 +47,39 @@ public class AiService {
     // ---------- Targets ----------
     public List<SubjectTargetDTO> listTargets() {
         log.debug("Calling AI listTargets");
-        return auth(rest.get().uri("/targets/"))
+        return auth(rest.get().uri("targets/"))
                 .retrieve().body(new org.springframework.core.ParameterizedTypeReference<>() {});
     }
 
     public SubjectTargetDTO getTarget(String idOrUuid) {
         log.debug("Calling AI getTarget id={}", idOrUuid);
-        return auth(rest.get().uri("/targets/{id}/", idOrUuid))
+        return auth(rest.get().uri("targets/{id}/", idOrUuid))
                 .retrieve().body(SubjectTargetDTO.class);
     }
 
     public SubjectTargetDTO createTarget(SubjectTargetDTO dto) {
         log.debug("Calling AI createTarget payload={}", dto);
-        return auth(rest.post().uri("/targets/")
+        return auth(rest.post().uri("targets/")
                 .contentType(MediaType.APPLICATION_JSON).body(dto))
                 .retrieve().body(SubjectTargetDTO.class);
     }
 
     public SubjectTargetDTO updateTarget(String idOrUuid, SubjectTargetDTO partial) {
         log.debug("Calling AI updateTarget id={} payload={}", idOrUuid, partial);
-        return auth(rest.patch().uri("/targets/{id}/", idOrUuid)
+        return auth(rest.patch().uri("targets/{id}/", idOrUuid)
                 .contentType(MediaType.APPLICATION_JSON).body(partial))
                 .retrieve().body(SubjectTargetDTO.class);
     }
 
     public void deleteTarget(String idOrUuid) {
         log.debug("Calling AI deleteTarget id={}", idOrUuid);
-        auth(rest.delete().uri("/targets/{id}/", idOrUuid))
+        auth(rest.delete().uri("targets/{id}/", idOrUuid))
                 .retrieve().toBodilessEntity();
     }
 
     // ---------- Aliases ----------
     public List<SubjectAliasDTO> listAliases(String language, String targetCode, String q) {
-        var uri = new StringBuilder("/aliases/?");
+        var uri = new StringBuilder("aliases/?");
         if (language != null) uri.append("language=").append(language).append("&");
         if (targetCode != null) uri.append("target_code=").append(targetCode).append("&");
         if (q != null) uri.append("q=").append(q);
@@ -90,21 +90,36 @@ public class AiService {
 
     public SubjectAliasDTO createAlias(SubjectAliasDTO dto) {
         log.debug("Calling AI createAlias payload={}", dto);
-        return auth(rest.post().uri("/aliases/")
-                .contentType(MediaType.APPLICATION_JSON).body(dto))
-                .retrieve().body(SubjectAliasDTO.class);
+        try {
+            // Send both target and target_code to satisfy SlugRelatedField on the matcher side.
+            var payload = new java.util.HashMap<String, Object>();
+            payload.put("target", dto.target());
+            payload.put("target_code", dto.target());
+            payload.put("label", dto.label());
+            if (dto.norm_label() != null) payload.put("norm_label", dto.norm_label());
+            if (dto.language() != null) payload.put("language", dto.language());
+
+            return auth(rest.post().uri("aliases/")
+                    .contentType(MediaType.APPLICATION_JSON).body(payload))
+                    .retrieve().body(SubjectAliasDTO.class);
+        } catch (org.springframework.web.client.RestClientResponseException ex) {
+            String body = ex.getResponseBodyAsString();
+            String msg = "Alias creation failed: status=%s body=%s".formatted(ex.getRawStatusCode(), body);
+            log.error(msg);
+            throw new IllegalStateException(msg, ex);
+        }
     }
 
     public SubjectAliasDTO updateAlias(String idOrUuid, SubjectAliasDTO partial) {
         log.debug("Calling AI updateAlias id={} payload={}", idOrUuid, partial);
-        return auth(rest.patch().uri("/aliases/{id}/", idOrUuid)
+        return auth(rest.patch().uri("aliases/{id}/", idOrUuid)
                 .contentType(MediaType.APPLICATION_JSON).body(partial))
                 .retrieve().body(SubjectAliasDTO.class);
     }
 
     public void deleteAlias(String idOrUuid) {
         log.debug("Calling AI deleteAlias id={}", idOrUuid);
-        auth(rest.delete().uri("/aliases/{id}/"))
+        auth(rest.delete().uri("aliases/{id}/"))
                 .retrieve().toBodilessEntity();
     }
 

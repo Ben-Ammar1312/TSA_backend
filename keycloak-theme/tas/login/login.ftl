@@ -1,12 +1,12 @@
 <#import "template.ftl" as layout>
 
-<@layout.registrationLayout displayInfo=false displayWide=true; section>
+<@layout.registrationLayout displayInfo=false displayMessage=true displayRequiredFields=false; section>
     <#if section = "title">
         ${msg("loginTitle", (realm.displayName!''))}
     <#elseif section = "header">
         <!-- header handled in custom card -->
     <#elseif section = "form">
-        <div class="page">
+        <div class="page login-page">
             <div class="card">
                 <div class="brand">
                     <div class="logo">🌀</div>
@@ -17,7 +17,7 @@
                 </div>
 
                 <div class="form-area">
-                    <div class="form-title">${msg("loginTitle")!}</div>
+                    <div class="form-title">Sign in to TAS</div>
 
                     <#if message?has_content>
                         <div class="${properties.kcAlertClass!} ${properties['kcAlert' + message.type?cap_first + 'Class']!}">
@@ -31,7 +31,7 @@
 
                             <div class="${properties.kcFormGroupClass!} kc-form-group">
                                 <label for="username" class="${properties.kcLabelClass!}">${msg("username")}</label>
-                                <input tabindex="1" id="username" class="${properties.kcInputClass!}" name="username" value="${(login.username!'')?html}" type="text" autofocus autocomplete="username">
+                                <input tabindex="1" id="username" class="${properties.kcInputClass!}" name="username" value="${login.username!''}" type="text" autofocus autocomplete="username">
                             </div>
 
                             <div class="${properties.kcFormGroupClass!} kc-form-group">
@@ -65,16 +65,16 @@
                             ${msg("noAccount")} <a href="${url.registrationUrl}" class="link">${msg("doRegister")}</a>
                         </div>
                     </#if>
-                </div>
-            </div>
 
-            <div class="info">
-                <div class="info-title">Welcome back</div>
-                <div class="info-subtitle">Secure access to TAS with a clean, modern look.</div>
-                <div class="info-list">
-                    <div>• Dark, focused login experience</div>
-                    <div>• Fast access to your applications</div>
-                    <div>• Protected by Keycloak</div>
+                    <#if auth?has_content && auth.showTryAnotherWayLink()>
+                        <form class="try-another-form" action="${url.loginAction}" method="post">
+                            <input type="hidden" name="tryAnotherWay" value="on">
+                            <button type="submit" class="link try-another-link">
+                                ${msg("doTryAnotherWay")}
+                            </button>
+                        </form>
+                    </#if>
+
                 </div>
             </div>
         </div>
