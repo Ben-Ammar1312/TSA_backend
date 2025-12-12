@@ -6,17 +6,22 @@ import org.example.tas_backend.dtos.InviteUpdateDTO;
 import org.example.tas_backend.entities.Invite;
 import org.example.tas_backend.enums.InviteStatus;
 import org.example.tas_backend.repos.InviteRepo;
+import org.example.tas_backend.services.MeetingRecordingService;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/admin/meet")
@@ -25,6 +30,7 @@ public class InviteController {
 
     private final InviteRepo repo;
     private final SimpMessagingTemplate broker;
+    private final MeetingRecordingService recordings;
 
     @GetMapping("/invites")
     public List<Invite> list(@RequestParam(required = false) String targetUserId,
@@ -111,7 +117,40 @@ public class InviteController {
         return inv;
     }
 
+    @PostMapping("/invites/{id}/recording")
+    public Invite uploadRecording(@PathVariable UUID id,
+                                  @RequestParam("file") MultipartFile file,
+                                  @AuthenticationPrincipal Jwt jwt) throws java.io.IOException {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Audio file is required");
+        }
+        Invite inv = repo.findById(id).orElseThrow();
+        enforceParticipant(inv, jwt);
+        return recordings.storeRecording(id, file);
+    }
+
+    @GetMapping("/invites/{id}/summary/download")
+    public org.springframework.http.ResponseEntity<ByteArrayResource> downloadSummary(@PathVariable UUID id,
+                                                                                      @AuthenticationPrincipal Jwt jwt) {
+        Invite inv = repo.findById(id).orElseThrow();
+        enforceParticipant(inv, jwt);
+        if (inv.getCallSummary() == null || inv.getCallSummary().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No summary available for this call");
+        }
+        byte[] bytes = inv.getCallSummary().getBytes(StandardCharsets.UTF_8);
+        ByteArrayResource resource = new ByteArrayResource(bytes);
+        String filename = "call-summary-" + id + ".txt";
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(resource);
+    }
+
     private void publish(Invite inv) {
+        if (inv.getCreatedBy() != null && !inv.getCreatedBy().isBlank()) {
+            broker.convertAndSend("/topic/invites/" + inv.getCreatedBy(), inv);
+        }
         broker.convertAndSend("/topic/invites/" + inv.getTargetUserId(), inv);
         broker.convertAndSend("/topic/invites/admin", inv);
     }
@@ -140,6 +179,18 @@ public class InviteController {
         boolean isCreator = inv.getCreatedBy() != null && inv.getCreatedBy().equals(sub);
         if (!isTarget && !(isCreator && inv.getStatus() == InviteStatus.PROPOSED)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not allowed to accept invite");
+        }
+    }
+
+    private void enforceParticipant(Invite inv, Jwt jwt) {
+        if (jwt == null || jwt.getSubject() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden");
+        }
+        String sub = jwt.getSubject();
+        boolean isTarget = sub.equals(inv.getTargetUserId());
+        boolean isCreator = inv.getCreatedBy() != null && inv.getCreatedBy().equals(sub);
+        if (!isTarget && !isCreator) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the participants can perform this action");
         }
     }
 }

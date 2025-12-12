@@ -24,5 +24,6 @@ public record StudentApplicantProfileDTO(
         String visaStatus,
         String language,
         List<String> uploadedFiles,
-        List<DocumentInfoDTO> uploadedFileDetails
+        List<DocumentInfoDTO> uploadedFileDetails,
+        String photoDataUrl
 ) {}

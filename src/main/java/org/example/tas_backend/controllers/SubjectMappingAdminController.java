@@ -21,7 +21,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/admin/mappings")
@@ -111,15 +116,43 @@ public class SubjectMappingAdminController {
     }
 
     private void dropAlias(String rawLabel, String targetCode) {
-        if (!StringUtils.hasText(targetCode)) return;
+        if (!StringUtils.hasText(targetCode) || !StringUtils.hasText(rawLabel)) return;
         try {
-            var aliases = ai.listAliases(null, targetCode, rawLabel);
+            String normalized = normalizeForMatch(rawLabel);
+
+            // Query Django aliases using both the raw and normalized label so norm_label hits are included.
+            List<org.example.tas_backend.dtos.SubjectAliasDTO> aliases = new ArrayList<>();
+            aliases.addAll(ai.listAliases(null, targetCode, rawLabel));
+            if (StringUtils.hasText(normalized) && !normalized.equalsIgnoreCase(rawLabel)) {
+                aliases.addAll(ai.listAliases(null, targetCode, normalized));
+            }
+
+            Set<java.util.UUID> seen = new HashSet<>();
             aliases.stream()
-                    .filter(a -> a.label() != null && a.label().equalsIgnoreCase(rawLabel))
+                    .filter(a -> a != null && a.id() != null && seen.add(a.id()))
+                    .filter(a -> matchesAlias(a, rawLabel, normalized))
                     .forEach(a -> ai.deleteAlias(a.id().toString()));
         } catch (Exception ex) {
             log.warn("Failed to delete alias for {} -> {}: {}", rawLabel, targetCode, ex.getMessage());
         }
+    }
+
+    private boolean matchesAlias(org.example.tas_backend.dtos.SubjectAliasDTO a, String rawLabel, String normalized) {
+        String label = a.label();
+        String norm = a.norm_label();
+        return (StringUtils.hasText(label) && label.equalsIgnoreCase(rawLabel))
+                || (StringUtils.hasText(label) && StringUtils.hasText(normalized) && label.equalsIgnoreCase(normalized))
+                || (StringUtils.hasText(norm) && StringUtils.hasText(normalized) && norm.equalsIgnoreCase(normalized))
+                || (StringUtils.hasText(norm) && norm.equalsIgnoreCase(rawLabel));
+    }
+
+    private String normalizeForMatch(String raw) {
+        if (!StringUtils.hasText(raw)) return raw;
+        String noDiacritics = Normalizer.normalize(raw, Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        String cleaned = noDiacritics.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\s]+", " ");
+        String compact = cleaned.trim().replaceAll("\\s+", " ");
+        return compact.toLowerCase();
     }
 
     private void dropSuggestion(String rawLabel, String targetCode) {

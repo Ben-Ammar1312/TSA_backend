@@ -27,6 +27,7 @@ public class AuditHistoryService {
 
         var reader = AuditReaderFactory.get(em);
         var revs = reader.getRevisions(type, id);
+        Number firstRev = revs.stream().min(Comparator.comparingLong(Number::longValue)).orElse(null);
         PersistenceUnitUtil idUtil = em.getEntityManagerFactory().getPersistenceUnitUtil();
 
         List<RevisionSummaryDTO> out = new ArrayList<>(revs.size());
@@ -46,7 +47,7 @@ public class AuditHistoryService {
                         .add(AuditEntity.revisionNumber().eq(rev))
                         .add(AuditEntity.property(p).hasChanged())
                         .getResultList().isEmpty();
-                if (changedHere) {
+                if (changedHere || revEquals(rev, firstRev)) {
                     changed.add(p);
                     String value = bean != null ? formatValue(bean.getPropertyValue(p), idUtil) : "unavailable";
                     changedValues.put(p, value);
@@ -83,6 +84,7 @@ public class AuditHistoryService {
 
                 Object id = em.getEntityManagerFactory().getPersistenceUnitUtil().getIdentifier(entityAtRev);
                 Number rev = meta.getId();
+                Number firstRev = findFirstRevision(reader, type, id);
                 Instant at = Instant.ofEpochMilli(meta.getTimestamp());
                 String by = meta.getActor();
 
@@ -95,7 +97,7 @@ public class AuditHistoryService {
                             .add(AuditEntity.revisionNumber().eq(rev))
                             .add(AuditEntity.property(p).hasChanged())
                             .getResultList().isEmpty();
-                    if (changedHere) {
+                    if (changedHere || revEquals(rev, firstRev)) {
                         changed.add(p);
                         String value = bean != null ? formatValue(bean.getPropertyValue(p), idUtil) : "unavailable";
                         changedValues.put(p, value);
@@ -132,5 +134,19 @@ public class AuditHistoryService {
         String s = val.toString();
         if (s.length() > 140) s = s.substring(0, 137) + "...";
         return s;
+    }
+
+    private boolean revEquals(Number a, Number b) {
+        if (a == null || b == null) return false;
+        return a.longValue() == b.longValue();
+    }
+
+    private Number findFirstRevision(org.hibernate.envers.AuditReader reader, Class<?> type, Object id) {
+        try {
+            var revs = reader.getRevisions(type, id);
+            return revs.stream().min(Comparator.comparingLong(Number::longValue)).orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 }

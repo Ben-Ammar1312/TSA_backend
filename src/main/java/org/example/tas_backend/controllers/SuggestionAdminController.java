@@ -2,6 +2,7 @@ package org.example.tas_backend.controllers;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.example.tas_backend.dtos.SuggestionDecisionDTO;
 import org.example.tas_backend.entities.MappingSuggestion;
 import org.example.tas_backend.enums.SuggestionStatus;
@@ -19,6 +20,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/suggestions")
 @RequiredArgsConstructor
+@Slf4j
 public class SuggestionAdminController {
     private final MappingSuggestionRepo repo;
     private final AiService django; // to create alias in Django
@@ -52,19 +54,49 @@ public class SuggestionAdminController {
         }
 
         if ("accept".equalsIgnoreCase(body.getAction())) {
-            // create alias in Django
+            // create alias in Django (use normalized label if available)
+            String aliasLabel = StringUtils.hasText(s.getNormLabel()) ? s.getNormLabel() : s.getSrcLabel();
             var alias = new org.example.tas_backend.dtos.SubjectAliasDTO(
-                    null, s.getProposedTargetCode(), s.getSrcLabel(), null,
+                    null, s.getProposedTargetCode(), aliasLabel, null,
                     StringUtils.hasText(s.getLanguage()) ? s.getLanguage() : "fr");
-            django.createAlias(alias);
-
-            s.setStatus(SuggestionStatus.ACCEPTED);
+            try {
+                django.createAlias(alias);
+                s.setStatus(SuggestionStatus.ACCEPTED);
+            } catch (Exception ex) {
+                log.error("Failed to create alias for suggestion {} target {} label {}",
+                        s.getId(), s.getProposedTargetCode(), aliasLabel, ex);
+                // Keep it pending so it stays visible for retry; surface error in reason
+                s.setStatus(SuggestionStatus.PENDING);
+                String prefix = StringUtils.hasText(body.getComment()) ? body.getComment() + " | " : "";
+                s.setReason(prefix + "Alias creation failed: " + ex.getMessage());
+                s.setDecidedBy(auth != null ? auth.getName() : "admin");
+                s.setDecidedAt(OffsetDateTime.now());
+                return repo.save(s);
+            }
         } else {
             s.setStatus(SuggestionStatus.REJECTED);
         }
         s.setDecidedBy(auth != null ? auth.getName() : "admin");
         s.setDecidedAt(OffsetDateTime.now());
-        s.setReason(body.getComment());
+        if (!StringUtils.hasText(s.getReason())) {
+            s.setReason(body.getComment());
+        }
         return repo.save(s);
+    }
+
+    /** Danger: purge suggestions (optionally filter by status=accepted|rejected|pending). */
+    @DeleteMapping
+    @Transactional
+    public void deleteAll(@RequestParam(required = false) String status) {
+        if (!StringUtils.hasText(status)) {
+            repo.deleteAll();
+            return;
+        }
+        try {
+            var st = SuggestionStatus.valueOf(status.toUpperCase());
+            repo.deleteAll(repo.findByStatus(st, Sort.unsorted()));
+        } catch (IllegalArgumentException ignored) {
+            // ignore invalid status parameter
+        }
     }
 }

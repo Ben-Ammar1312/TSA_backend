@@ -11,32 +11,43 @@ import org.example.tas_backend.entities.Document;
 import org.example.tas_backend.repos.ApplicationRepo;
 import org.example.tas_backend.repos.DocumentRepo;
 import org.example.tas_backend.repos.StudentApplicantRepo;
+import org.keycloak.admin.client.Keycloak;
+import org.keycloak.representations.idm.RoleRepresentation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.example.tas_backend.dtos.StudentApplicantProfileDTO;
 import org.example.tas_backend.dtos.DocumentInfoDTO;
-
+import lombok.extern.slf4j.Slf4j;
 
 
 import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class StudentApplicantService {
 
     private final StudentApplicantRepo repo;
     private final ApplicationRepo applicationRepo;
     private final DocumentRepo documentRepo;
+    private final Keycloak keycloak;
+    private final String realm;
     @Value("${storage.upload-root:uploads}")
     private String uploadRoot;
 
 
     public StudentApplicantService(StudentApplicantRepo repo,
                                    ApplicationRepo applicationRepo,
-                                   DocumentRepo documentRepo) {
+                                   DocumentRepo documentRepo,
+                                   Keycloak keycloak,
+                                   @Value("${keycloak.realm}") String realm) {
         this.repo = repo;
         this.applicationRepo = applicationRepo;
         this.documentRepo = documentRepo;
+        this.keycloak = keycloak;
+        this.realm = realm;
     }
 
     /** Create-or-refresh snapshot from Keycloak JWT (firstName, lastName, email). */
@@ -64,6 +75,10 @@ public class StudentApplicantService {
         sa.getAudit().setUpdatedBy(sub);
 
         sa = repo.save(sa);
+
+        // make sure realm role student exists for this user (unless admin/staff)
+        ensureStudentRole(sub);
+
         return toDto(sa);
     }
 
@@ -82,6 +97,7 @@ public class StudentApplicantService {
         if (dto.nationality() != null) sa.setNationality(dto.nationality());
         if (dto.residence() != null)   sa.setResidence(dto.residence());
         if (dto.visaStatus() != null)  sa.setVisaStatus(dto.visaStatus());
+        if (dto.photoDataUrl() != null) sa.setPhotoData(dto.photoDataUrl());
 
         if (dto.gender() != null) {
             // tolerate lowercase from clients
@@ -130,7 +146,8 @@ public class StudentApplicantService {
             docs.stream().map(this::toPublicPath).toList(),
             docs.stream()
                     .map(this::toDocumentInfo)
-                    .toList()
+                    .toList(),
+            e.getPhotoData()
         );
     }
 
@@ -178,5 +195,31 @@ public class StudentApplicantService {
                 doc.getSizeBytes(),
                 null
         );
+    }
+
+    /**
+     * Adds realm role "student" to the user if they don't already have student/staff/admin.
+     */
+    private void ensureStudentRole(String keycloakSub) {
+        try {
+            var userResource = keycloak.realm(realm).users().get(keycloakSub);
+            Set<String> roles = userResource.roles()
+                    .realmLevel()
+                    .listAll()
+                    .stream()
+                    .map(RoleRepresentation::getName)
+                    .map(String::toLowerCase)
+                    .collect(Collectors.toSet());
+
+            if (roles.contains("admin") || roles.contains("staff") || roles.contains("student")) {
+                return; // already has a meaningful realm role
+            }
+
+            var studentRole = keycloak.realm(realm).roles().get("student").toRepresentation();
+            userResource.roles().realmLevel().add(java.util.Collections.singletonList(studentRole));
+            log.info("Granted student role to user {}", keycloakSub);
+        } catch (Exception e) {
+            log.warn("Unable to ensure student role for {}: {}", keycloakSub, e.getMessage());
+        }
     }
 }

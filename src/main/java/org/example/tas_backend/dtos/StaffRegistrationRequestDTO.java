@@ -41,5 +41,6 @@ public record StaffRegistrationRequestDTO(
         @Size(max = 40)
         String dateOfBirth,
 
-        Gender gender
+        Gender gender,
+        String photoDataUrl
 ) {}

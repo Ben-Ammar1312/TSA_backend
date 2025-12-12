@@ -69,8 +69,9 @@ public class AcceptanceService {
     }
 
     private void applyRule(Application app, AcceptanceRule rule) {
-        // Skip final decisions
-        if (app.getStatus() == ApplicationStatus.APPROVED || app.getStatus() == ApplicationStatus.REJECTED) {
+        // Skip final admin decisions (decisionBy populated). Allow reevaluation of provisional states.
+        if (app.getDecisionBy() != null &&
+                (app.getStatus() == ApplicationStatus.APPROVED || app.getStatus() == ApplicationStatus.REJECTED)) {
             return;
         }
         int matched = mappingQueryService.countMappedSubjects(app.getId());

@@ -62,6 +62,7 @@ public class StaffProfileService {
         if (dto.jobTitle()    != null) s.setJobTitle(dto.jobTitle());
         if (dto.department()  != null) s.setDepartment(dto.department());
         if (dto.nationalID()  != null) s.setNationalID(dto.nationalID());
+        if (dto.photoDataUrl() != null) s.setPhotoData(dto.photoDataUrl());
 
         if (dto.gender() != null) s.setGender(Gender.valueOf(dto.gender().name()));
 
@@ -95,7 +96,8 @@ public class StaffProfileService {
                 e.getDateOfBirth(),
                 e.getNationalID(),
                 e.getJobTitle(),
-                e.getDepartment()
+                e.getDepartment(),
+                e.getPhotoData()
         );
     }
 }
